@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../core/constants/app_colors.dart';
+import '../pages/admin/data_hub_page.dart';
+import '../pages/admin/monitoring/monitoring_admin_page.dart';
+import '../pages/admin/presensi/presensi_admin_page.dart';
 import '../pages/auth/login_page.dart';
+import '../pages/pengasuh/monitoring/monitoring_pengasuh_page.dart';
 import '../services/auth_service.dart';
 
 // ============================================================
@@ -357,17 +361,34 @@ class DashboardBottomNav extends StatelessWidget {
   final String nama;
   final String peran;
 
+  /// Tab yang sedang aktif (0 = Dashboard).
+  final int currentIndex;
+
+  /// Dipanggil saat tab Dashboard ditekan dari halaman lain.
+  final VoidCallback? onDashboard;
+
+  /// Dipanggil saat tab Presensi ditekan (dipakai Pengurus).
+  /// Kalau kosong, Admin tetap ke PresensiAdminPage, lainnya tampil "segera".
+  final VoidCallback? onPresensi;
+
+  /// Dipanggil saat tab Riwayat ditekan. Kalau kosong, tampil "segera".
+  final VoidCallback? onRiwayat;
+
   const DashboardBottomNav({
     super.key,
     required this.menu,
     required this.nama,
     required this.peran,
+    this.currentIndex = 0,
+    this.onDashboard,
+    this.onPresensi,
+    this.onRiwayat,
   });
 
   @override
   Widget build(BuildContext context) {
     return BottomNavigationBar(
-      currentIndex: 0,
+      currentIndex: currentIndex,
       type: BottomNavigationBarType.fixed,
       backgroundColor: Colors.white,
       selectedItemColor: hijau,
@@ -375,14 +396,47 @@ class DashboardBottomNav extends StatelessWidget {
       selectedFontSize: 12,
       unselectedFontSize: 12,
       onTap: (index) {
-        final item = menu[index];
-
-        if (index == 0) {
+        if (index == currentIndex) {
           return;
         }
 
-        if (item.label == 'Profil') {
+        final item = menu[index];
+
+        if (item.label == 'Dashboard' && onDashboard != null) {
+          onDashboard!();
+        } else if (item.label == 'Riwayat' && onRiwayat != null) {
+          onRiwayat!();
+        } else if (item.label == 'Presensi' && onPresensi != null) {
+          onPresensi!();
+        } else if (item.label == 'Presensi' && peran == 'Admin') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PresensiAdminPage(namaLengkap: nama),
+            ),
+          );
+        } else if (item.label == 'Monitoring' && peran == 'Admin') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MonitoringAdminPage(namaLengkap: nama),
+            ),
+          );
+        } else if (item.label == 'Monitoring' &&
+            peran.startsWith('Pengasuh')) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MonitoringPengasuhPage(namaLengkap: nama),
+            ),
+          );
+        } else if (item.label == 'Profil') {
           tampilkanMenuProfil(context, nama: nama, peran: peran);
+        } else if (item.label == 'Data') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const DataHubPage()),
+          );
         } else {
           tampilkanSegera(context, item.label);
         }

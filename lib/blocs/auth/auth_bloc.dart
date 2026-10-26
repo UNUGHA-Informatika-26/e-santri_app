@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
@@ -9,12 +12,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthService _authService;
 
   AuthBloc({
-    required this._authService,
-  }) : super(const AuthInitial()) {
+    required AuthService authService,
+  })  :
+        // ignore: prefer_initializing_formals
+        _authService = authService,
+        super(const AuthInitial()) {
     on<AuthLoginRequested>(_onLoginRequested);
     on<AuthLogoutRequested>(_onLogoutRequested);
     on<AuthProfileRequested>(_onProfileRequested);
   }
+
+  static const Duration _batasWaktu = Duration(seconds: 15);
 
   Future<void> _onLoginRequested(
     AuthLoginRequested event,
@@ -23,12 +31,22 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     emit(const AuthLoading());
 
     try {
-      await _authService.login(
-        identifier: event.identifier,
-        password: event.password,
-      );
+      debugPrint('LOGIN 1: mulai login');
 
-      final profile = await _authService.getCurrentProfile();
+      await _authService
+          .login(
+            identifier: event.identifier,
+            password: event.password,
+          )
+          .timeout(_batasWaktu);
+
+      debugPrint('LOGIN 2: login berhasil, ambil profil');
+
+      final profile = await _authService
+          .getCurrentProfile()
+          .timeout(_batasWaktu);
+
+      debugPrint('LOGIN 3: profil = $profile');
 
       if (profile == null) {
         await _authService.logout();
@@ -71,6 +89,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
       emit(AuthAuthenticated(profile: profile));
     } catch (error) {
+      debugPrint('LOGIN ERROR: $error');
       emit(AuthError(_loginErrorMessage(error)));
     }
   }
@@ -128,6 +147,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   String _loginErrorMessage(Object error) {
+    if (error is TimeoutException) {
+      return 'Server tidak merespons. Periksa koneksi internet.';
+    }
+
     final message = error.toString().toLowerCase();
 
     if (message.contains('username tidak ditemukan')) {

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/auth/auth_event.dart';
+import '../../blocs/auth/auth_state.dart';
 import '../../core/constants/app_colors.dart';
-import '../../services/auth_service.dart';
 import '../../widgets/input_decorations.dart';
 
 import 'forgot_password_page.dart';
@@ -27,12 +29,12 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController passwordController =
       TextEditingController();
 
-  final AuthService _authService = AuthService();
-
   String peran = 'Admin';
 
   bool sembunyikanPassword = true;
-  bool sedangLogin = false;
+
+  /// Hanya dipakai di dalam build (memantau state Bloc).
+  bool get sedangLogin => context.watch<AuthBloc>().state is AuthLoading;
 
   @override
   void dispose() {
@@ -43,182 +45,94 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   // ============================================================
-  // TOLAK LOGIN: keluar dari sesi lalu tampilkan pesan
+  // LOGIN: kirim event ke AuthBloc
   // ============================================================
 
-  Future<void> _tolakLogin(String pesan) async {
-    try {
-      await _authService.logout();
-    } catch (_) {}
-
-    if (!mounted) {
-      return;
-    }
-
-    showLoginError(pesan);
-  }
-
-  // ============================================================
-  // LOGIN
-  // ============================================================
-
-  Future<void> login() async {
+  void login() {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    if (sedangLogin) {
+    final bloc = context.read<AuthBloc>();
+
+    if (bloc.state is AuthLoading) {
       return;
     }
 
     FocusScope.of(context).unfocus();
 
-    final String identifier = usernameController.text.trim();
-    final String password = passwordController.text;
+    bloc.add(
+      AuthLoginRequested(
+        identifier: usernameController.text.trim(),
+        password: passwordController.text,
+      ),
+    );
+  }
 
-    setState(() {
-      sedangLogin = true;
-    });
+  // ============================================================
+  // HASIL DARI BLOC
+  // ============================================================
 
-    try {
-      // LOGIN DENGAN EMAIL ATAU USERNAME
-      final response = await _authService.login(
-        identifier: identifier,
-        password: password,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      if (response.user == null) {
-        showLoginError('Login gagal. Akun tidak ditemukan.');
-        return;
-      }
-
-      // AMBIL PROFIL DARI DATABASE
-      final profile = await _authService.getCurrentProfile();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (profile == null) {
-        await _tolakLogin('Data profil akun belum ditemukan.');
-        return;
-      }
-
-      // CEK STATUS AKUN (kolom di database bernama "status")
-      final String? status = profile['status']?.toString();
-
-      if (status == 'pending') {
-        await _tolakLogin('Akun masih menunggu persetujuan Admin.');
-        return;
-      }
-
-      if (status == 'blocked') {
-        await _tolakLogin('Akun kamu telah diblokir oleh Admin.');
-        return;
-      }
-
-      if (status != 'active') {
-        await _tolakLogin(
-          'Status akun tidak dapat digunakan untuk login.',
-        );
-        return;
-      }
-
-      // CEK ROLE DARI DATABASE
-      final String? roleDatabase = profile['role']?.toString();
-
-      if (!_cekRoleSesuai(roleDatabase, peran)) {
-        await _tolakLogin(
-          'Role akun tidak sesuai dengan pilihan login.',
-        );
-        return;
-      }
-
-      final String nama =
-          profile['full_name']?.toString().trim() ?? '';
-
-      if (!mounted) {
-        return;
-      }
-
-      // ROUTING BERDASARKAN ROLE DATABASE
-      if (roleDatabase == 'admin') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => AdminDashboardPage(
-              namaLengkap: nama.isEmpty ? 'Admin' : nama,
-            ),
-          ),
-        );
-        return;
-      }
-
-      if (roleDatabase == 'pengurus') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PengurusDashboardPage(
-              namaLengkap: nama.isEmpty ? 'Pengurus' : nama,
-            ),
-          ),
-        );
-        return;
-      }
-
-      if (roleDatabase == 'pengasuh') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PengasuhDashboardPage(
-              namaLengkap: nama.isEmpty ? 'Pengasuh' : nama,
-            ),
-          ),
-        );
-        return;
-      }
-
-      await _tolakLogin('Role akun tidak dikenali.');
-    } on AuthException catch (e) {
-      if (!mounted) {
-        return;
-      }
-
-      final String message = e.message.toLowerCase();
-
-      String pesan = 'Login gagal.';
-
-      if (message.contains('invalid login credentials')) {
-        pesan = 'Username/email atau password salah.';
-      } else if (message.contains('username tidak ditemukan')) {
-        pesan = 'Username tidak ditemukan.';
-      } else if (message.contains('email not confirmed')) {
-        pesan = 'Email belum dikonfirmasi.';
-      } else if (message.contains('too many requests') ||
-          message.contains('rate limit')) {
-        pesan = 'Terlalu banyak percobaan. Silakan coba lagi nanti.';
-      } else if (e.message.isNotEmpty) {
-        pesan = e.message;
-      }
-
-      showLoginError(pesan);
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-
-      showLoginError('Terjadi kesalahan saat login.');
-    } finally {
-      if (mounted) {
-        setState(() {
-          sedangLogin = false;
-        });
-      }
+  void _tanganiState(BuildContext context, AuthState state) {
+    if (state is AuthError) {
+      showLoginError(state.message);
+      return;
     }
+
+    if (state is! AuthAuthenticated) {
+      return;
+    }
+
+    final String? roleDatabase = state.profile['role']?.toString();
+
+    if (!_cekRoleSesuai(roleDatabase, peran)) {
+      showLoginError('Role akun tidak sesuai dengan pilihan login.');
+      context.read<AuthBloc>().add(const AuthLogoutRequested());
+      return;
+    }
+
+    final String nama =
+        state.profile['full_name']?.toString().trim() ?? '';
+
+    // ROUTING BERDASARKAN ROLE DATABASE
+    if (roleDatabase == 'admin') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AdminDashboardPage(
+            namaLengkap: nama.isEmpty ? 'Admin' : nama,
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (roleDatabase == 'pengurus') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PengurusDashboardPage(
+            namaLengkap: nama.isEmpty ? 'Pengurus' : nama,
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (roleDatabase == 'pengasuh') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PengasuhDashboardPage(
+            namaLengkap: nama.isEmpty ? 'Pengasuh' : nama,
+          ),
+        ),
+      );
+      return;
+    }
+
+    showLoginError('Role akun tidak dikenali.');
+    context.read<AuthBloc>().add(const AuthLogoutRequested());
   }
 
   // ============================================================
@@ -294,209 +208,114 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: krem,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 25,
-            vertical: 25,
-          ),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                const SizedBox(height: 20),
+    return BlocListener<AuthBloc, AuthState>(
+      listener: _tanganiState,
+      child: Scaffold(
+        backgroundColor: krem,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 25,
+              vertical: 25,
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 20),
 
-                Image.asset(
-                  'assets/images/logo.png',
-                  width: 130,
-                  height: 130,
-                  fit: BoxFit.contain,
-                ),
-
-                const SizedBox(height: 20),
-
-                const Text(
-                  'Selamat Datang',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: hijauTua,
-                    fontSize: 27,
-                    fontWeight: FontWeight.bold,
+                  Image.asset(
+                    'assets/images/logo.png',
+                    width: 130,
+                    height: 130,
+                    fit: BoxFit.contain,
                   ),
-                ),
 
-                const SizedBox(height: 8),
+                  const SizedBox(height: 20),
 
-                const Text(
-                  'Masuk ke akun E-Santri',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.black54,
-                    fontSize: 15,
-                  ),
-                ),
-
-                const SizedBox(height: 30),
-
-                // USERNAME / EMAIL
-                TextFormField(
-                  controller: usernameController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: loginDecoration(
-                    'Username / Email',
-                    Icons.person_outline,
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Username atau email wajib diisi';
-                    }
-
-                    return null;
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                // PASSWORD
-                TextFormField(
-                  controller: passwordController,
-                  obscureText: sembunyikanPassword,
-                  decoration: loginDecoration(
-                    'Password',
-                    Icons.lock_outline,
-                  ).copyWith(
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        sembunyikanPassword
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                        color: hijau,
-                      ),
-                      onPressed: sedangLogin
-                          ? null
-                          : () {
-                              setState(() {
-                                sembunyikanPassword =
-                                    !sembunyikanPassword;
-                              });
-                            },
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Password wajib diisi';
-                    }
-
-                    return null;
-                  },
-                ),
-
-                const SizedBox(height: 10),
-
-                // LUPA PASSWORD
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: sedangLogin
-                        ? null
-                        : () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const ForgotPasswordPage(),
-                              ),
-                            );
-                          },
-                    child: const Text(
-                      'Lupa Password?',
-                      style: TextStyle(
-                        color: hijau,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                // ROLE
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Masuk sebagai',
+                  const Text(
+                    'Selamat Datang',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: hijauTua,
-                      fontSize: 15,
+                      fontSize: 27,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                ),
 
-                const SizedBox(height: 12),
+                  const SizedBox(height: 8),
 
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    roleButton('Admin'),
-                    roleButton('Pengurus'),
-                    roleButton('Pengasuh / Kyai'),
-                  ],
-                ),
-
-                const SizedBox(height: 25),
-
-                // TOMBOL LOGIN
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: sedangLogin ? null : login,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: hijauTua,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          hijauTua.withValues(alpha: 0.6),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
+                  const Text(
+                    'Masuk ke akun E-Santri',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.black54,
+                      fontSize: 15,
                     ),
-                    child: sedangLogin
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text(
-                            'Login',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
                   ),
-                ),
 
-                const SizedBox(height: 18),
+                  const SizedBox(height: 30),
 
-                // DAFTAR
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      'Belum punya akun? ',
-                      style: TextStyle(
-                        color: Colors.black54,
+                  // USERNAME / EMAIL
+                  TextFormField(
+                    controller: usernameController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: loginDecoration(
+                      'Username / Email',
+                      Icons.person_outline,
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Username atau email wajib diisi';
+                      }
+
+                      return null;
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // PASSWORD
+                  TextFormField(
+                    controller: passwordController,
+                    obscureText: sembunyikanPassword,
+                    decoration: loginDecoration(
+                      'Password',
+                      Icons.lock_outline,
+                    ).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          sembunyikanPassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: hijau,
+                        ),
+                        onPressed: sedangLogin
+                            ? null
+                            : () {
+                                setState(() {
+                                  sembunyikanPassword =
+                                      !sembunyikanPassword;
+                                });
+                              },
                       ),
                     ),
-                    TextButton(
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Password wajib diisi';
+                      }
+
+                      return null;
+                    },
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // LUPA PASSWORD
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
                       onPressed: sedangLogin
                           ? null
                           : () {
@@ -504,21 +323,119 @@ class _LoginPageState extends State<LoginPage> {
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) =>
-                                      const RegisterPage(),
+                                      const ForgotPasswordPage(),
                                 ),
                               );
                             },
                       child: const Text(
-                        'Daftar',
+                        'Lupa Password?',
                         style: TextStyle(
                           color: hijau,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                  ],
-                ),
-              ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // ROLE
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Masuk sebagai',
+                      style: TextStyle(
+                        color: hijauTua,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      roleButton('Admin'),
+                      roleButton('Pengurus'),
+                      roleButton('Pengasuh / Kyai'),
+                    ],
+                  ),
+
+                  const SizedBox(height: 25),
+
+                  // TOMBOL LOGIN
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: sedangLogin ? null : login,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: hijauTua,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor:
+                            hijauTua.withValues(alpha: 0.6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: sedangLogin
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'Login',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // DAFTAR
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'Belum punya akun? ',
+                        style: TextStyle(
+                          color: Colors.black54,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: sedangLogin
+                            ? null
+                            : () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const RegisterPage(),
+                                  ),
+                                );
+                              },
+                        child: const Text(
+                          'Daftar',
+                          style: TextStyle(
+                            color: hijau,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
