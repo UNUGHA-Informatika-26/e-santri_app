@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/offline/antrean_santri.dart';
 import 'santri_model.dart';
 import 'santri_service.dart';
 
@@ -156,11 +157,39 @@ class _TambahSantriPageState extends State<TambahSantriPage> {
 
       _tampilkanError(e.pesan);
     } catch (_) {
-      if (!mounted) {
+      if (_modeEdit) {
+        if (!mounted) {
+          return;
+        }
+
+        _tampilkanError('Terjadi kesalahan saat menyimpan santri.');
         return;
       }
 
-      _tampilkanError('Terjadi kesalahan saat menyimpan santri.');
+      try {
+        await AntreanSantri.tambah(
+          ItemAntreanSantri(
+            nis: _nis.text.trim(),
+            namaLengkap: _nama.text.trim(),
+            gender: _gender!,
+            kamarId: _kamarId,
+            noHp: noHp.isEmpty ? null : noHp,
+            alamat: _alamat.text.trim().isEmpty ? null : _alamat.text.trim(),
+          ),
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        Navigator.pop(context, 'antre');
+      } catch (_) {
+        if (!mounted) {
+          return;
+        }
+
+        _tampilkanError('Terjadi kesalahan saat menyimpan santri.');
+      }
     } finally {
       if (mounted) {
         setState(() {

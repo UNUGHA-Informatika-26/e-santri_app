@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'blocs/auth/auth_bloc.dart';
 import 'core/constants/app_colors.dart';
+import 'core/offline/antrean_santri.dart';
 import 'core/offline/presensi_offline.dart';
 import 'core/supabase/supabase_config.dart';
 import 'pages/auth/splash_page.dart';
@@ -16,6 +17,7 @@ Future<void> main() async {
   // Mulai pantau internet & kirim antrean yang menunggu
   // (aman dipanggil meski user belum login / belum buka Isi Presensi).
   SinkronPresensi.instance.mulai();
+  SinkronSantri.instance.mulai();
 
   runApp(const ESantriApp());
 }

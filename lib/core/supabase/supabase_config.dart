@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../offline/cache_http.dart';
+
 const String supabaseUrl =
     'https://krupdsnjimlocdsvyeqz.supabase.co';
 
@@ -10,6 +12,7 @@ Future<void> initializeSupabase() async {
   await Supabase.initialize(
     url: supabaseUrl,
     publishableKey: supabasePublishableKey,
+    httpClient: CacheHttpClient(),
   );
 }
 
